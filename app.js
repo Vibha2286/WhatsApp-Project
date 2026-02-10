@@ -45,6 +45,7 @@ app.post("/webhook", async (req, res) => {
   const text = message.text?.body?.trim();
 
   // Initialize session if not exists
+  // Initialize session if not exists
   if (!sessions[from]) sessions[from] = { step: 0 };
 
   const session = sessions[from];
@@ -52,7 +53,7 @@ app.post("/webhook", async (req, res) => {
   try {
     switch (session.step) {
       case 0: // Waiting for HI
-        if (text  === "HI" || text === "Hi" || text === "hi") {
+        if (text === "hi" || text === "Hi" || text === "HI")  {
           await sendText(from, CONSTANTS.WELCOME_MESSAGE);
           session.step = 1;
         } else {
@@ -61,30 +62,45 @@ app.post("/webhook", async (req, res) => {
         break;
 
       case 1: // Ask for ID
-        session.idNumber = text;
-        await sendText(from, CONSTANTS.ASK_MOBILE);
-        session.step = 2;
+        // Validate South African ID: 13 digits
+        if (/^\d{13}$/.test(text)) {
+          session.idNumber = text;
+          await sendText(from, CONSTANTS.ASK_MOBILE);
+          session.step = 2;
+        } else {
+          await sendText(from, "❌ Invalid ID. Please enter a valid 13-digit South African ID number.");
+        }
         break;
 
       case 2: // Ask for mobile number
-        session.mobile = text;
-        await sendText(from, CONSTANTS.ASK_PIN);
-        session.step = 3;
+        // Validate South African mobile: +27 followed by 9 digits or 0 followed by 9 digits
+        if (/^(?:\+27|0)\d{9}$/.test(text)) {
+          session.mobile = text;
+          await sendText(from, CONSTANTS.ASK_PIN);
+          session.step = 3;
+        } else {
+          await sendText(from, "❌ Invalid mobile number. Please enter a valid South African mobile number.");
+        }
         break;
 
-      case 3: // Ask for PIN → Show interactive buttons
-        session.pin = text;
-        await sendButtons(from, CONSTANTS.OPTIONS_MESSAGE, CONSTANTS.REPLY_INTERACTIVE_WITH_MEDIA_CTAS);
-        session.step = 4;
+      case 3: // Ask for PIN
+        // Validate 6-digit PIN
+        if (/^\d{6}$/.test(text)) {
+          session.pin = text;
+          await sendButtons(from, CONSTANTS.OPTIONS_MESSAGE, CONSTANTS.REPLY_INTERACTIVE_WITH_MEDIA_CTAS);
+          session.step = 4;
+        } else {
+          await sendText(from, "❌ Invalid PIN. Please enter a 6-digit PIN.");
+        }
         break;
 
       case 4: // Handle final menu selection
         if (["1", "2", "3"].includes(text)) {
           await sendText(from, CONSTANTS.RESPONSES[text]);
-          session.step = 0; // Reset session
+          session.step = 0; // Reset session after completion
         } else {
           // If user types invalid input, resend buttons
-          await sendButtons(from, "Invalid option. Please choose:", CONSTANTS.REPLY_INTERACTIVE_WITH_MEDIA_CTAS);
+          await sendButtons(from, "Invalid option. Please choose 1, 2, or 3.", CONSTANTS.REPLY_INTERACTIVE_WITH_MEDIA_CTAS);
         }
         break;
 
@@ -97,6 +113,7 @@ app.post("/webhook", async (req, res) => {
   }
 
   res.sendStatus(200);
+
 });
 
 // Helper: Send text message
