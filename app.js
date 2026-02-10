@@ -52,7 +52,7 @@ app.post("/webhook", async (req, res) => {
   try {
     switch (session.step) {
       case 0: // Waiting for HI
-        if (text && text.toUpperCase() === "HI") {
+        if (text  === "HI" || text === "Hi" || text === "hi") {
           await sendText(from, CONSTANTS.WELCOME_MESSAGE);
           session.step = 1;
         } else {
