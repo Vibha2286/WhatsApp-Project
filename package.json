@@ -1,0 +1,15 @@
+{
+  "name": "ssassa-webhook",
+  "version": "1.0.0",
+  "description": "SASSA WhatsApp bot for checking application and payment status",
+  "main": "app.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node app.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "dotenv": "^16.0.3",
+    "axios": "^1.4.0"
+  }
+}
