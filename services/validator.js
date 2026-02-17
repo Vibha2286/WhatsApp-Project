@@ -17,7 +17,7 @@ function validatePin(value) {
     return /^[0-9]{6}$/.test(value);
 }
 
-export const ID_EXP = /^(\d{2})([0-1][0-9])([0-3]\d)(\d{4})([0-2]\d)\d$/;
+const ID_EXP = /^(\d{2})([0-1][0-9])([0-3]\d)(\d{4})([0-2]\d)\d$/;
 
 // Luhn Algorithm Function
 function luhn(value) {
