@@ -31,20 +31,26 @@ async function handleMessage(message) {
                 break;
 
             case 1: // Ask for ID
-                const result = validateId(text);
-                if (result === null) {
+                const validationResult = validateId(text);
 
-                    const { isValid, status } = await verifyID({ idnumber: text });
+                if (validationResult === null) {
+                    const verifyResult = await verifyID({ idnumber: text });
 
-                    if (isValid && status === "success") {
+                    console.log(verifyResult.isValid);   // true
+                    console.log(verifyResult.status);    // "success"
+                    console.log(verifyResult.message);   // "ID verification successful"
+                    console.log(verifyResult.idNumber);  // "7804106370180"
+
+                    if (verifyResult.isValid && verifyResult.status === "success") {
+                        console.log("ID is verified ✅");
                         session.idNumber = text;
                         await sendText(from, CONSTANTS.ASK_MOBILE);
                         session.step = 2;
                     } else {
+                        console.log("ID verification failed ❌");
                         session.step = 1;
                         await sendText(from, CONSTANTS.INVALID_ID_MESSAGE);
                     }
-
                 } else {
                     session.step = 1;
                     await sendText(from, "Please enter a valid 13-digit South African ID number.");
