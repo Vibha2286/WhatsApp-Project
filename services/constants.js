@@ -11,9 +11,9 @@ module.exports = Object.freeze({
   
   // Buttons for final menu
   REPLY_INTERACTIVE_WITH_MEDIA_CTAS: [
-    { id: "1", title: "Application Status" },
-    { id: "2", title: "Payment Date" },
-    { id: "3", title: "Payment Status" }
+    { id: "1", title: "1. Application Status" },
+    { id: "2", title: "2. Payment Date" },
+    { id: "3", title: "3. Payment Status" }
   ],
 
   // Responses for selected options

@@ -5,6 +5,7 @@ require("dotenv").config();
 const express = require("express");
 const axios = require("axios");
 const CONSTANTS = require("./services/constants");
+const { validateId } = require("./services//validator");
 
 const app = express();
 app.use(express.json());
@@ -45,7 +46,6 @@ app.post("/webhook", async (req, res) => {
   const text = message.text?.body?.trim();
 
   // Initialize session if not exists
-  // Initialize session if not exists
   if (!sessions[from]) sessions[from] = { step: 0 };
 
   const session = sessions[from];
@@ -57,18 +57,21 @@ app.post("/webhook", async (req, res) => {
           await sendText(from, CONSTANTS.WELCOME_MESSAGE);
           session.step = 1;
         } else {
+          session.step = 0;
           await sendText(from, "Please type 'HI' to start.");
         }
         break;
 
       case 1: // Ask for ID
         // Validate South African ID: 13 digits
-        if (/^\d{13}$/.test(text)) {
+        const result = validateId(text);
+        if (result === null)  {
           session.idNumber = text;
           await sendText(from, CONSTANTS.ASK_MOBILE);
           session.step = 2;
         } else {
-          await sendText(from, "❌ Invalid ID. Please enter a valid 13-digit South African ID number.");
+           session.step = 1;
+          await sendText(from, "Please enter a valid 13-digit South African ID number.");
         }
         break;
 

@@ -85,7 +85,6 @@ async function markMessageForFollowUp(messageId) {
   await Cache.insert(messageId);
 }
 
-
 module.exports = class Conversation {
   constructor(phoneNumberId) {
     this.phoneNumberId = phoneNumberId;
