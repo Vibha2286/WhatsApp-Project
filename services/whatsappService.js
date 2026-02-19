@@ -32,7 +32,7 @@ async function handleMessage(message) {
 
             case 1: // Ask for ID
                 const validationResult = validateId(text);
-
+                console.log("Validation Result:", validationResult);
                 if (validationResult === null) {
                     const verifyResult = await verifyID({ idnumber: text });
 
