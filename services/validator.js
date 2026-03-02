@@ -4,16 +4,12 @@ function validateAppId(value) {
     return /^[0-9]{6}$/.test(value);
 }
 
-// South African Mobile Number
-// Must start with 06, 07, 08, or 09 and total 10 digits
 function validateMobile(value) {
-    if (!value) return false;
     return /^0[6-9][0-9]{8}$/.test(value);
 }
 
 // PIN - exactly 6 digits
 function validatePin(value) {
-    if (!value) return false;
     return /^[0-9]{6}$/.test(value);
 }
 
@@ -35,7 +31,6 @@ function luhn(value) {
         sum += digit;
         shouldDouble = !shouldDouble;
     }
-
     return sum % 10;
 }
 

@@ -1,10 +1,10 @@
 module.exports = Object.freeze({
   // First welcome message
-  WELCOME_MESSAGE: "Welcome to SASSA SRD R370 Whatsapp Service \n By continuing, you agree that SASSA may use your information to verify your identity and provide your SRD status. \n\n Please provide your South African ID number",
+  WELCOME_MESSAGE: "👋 Welcome to SASSA SRD R370 Whatsapp Service \nBy continuing, you agree that SASSA may use your information to verify your identity and provide your SRD status. \n\nPlease provide your South African ID number",
 
   // Next prompts
   ASK_MOBILE: "Please provide the mobile number you used when applying for your SRD R370 grant.",
-  ASK_PIN: "Enter the OTP.",
+  ASK_PIN: "Enter the OTP",
 
   //Error messages
   INVALID_ID_MESSAGE: "The ID you entered is not found in our system. Please check the number and try again",
@@ -16,9 +16,9 @@ module.exports = Object.freeze({
   
   // Buttons for final menu
   REPLY_INTERACTIVE_WITH_MEDIA_CTAS: [
-    { id: "1", title: "1. Application Status" },
-    { id: "2", title: "2. Payment Date" },
-    { id: "3", title: "3. Payment Status" }
+    { id: "1", title: "Application Status" },
+    { id: "2", title: "Payment Date" },
+    { id: "3", title: "Payment Done Status" }
   ],
 
   // Responses for selected options
