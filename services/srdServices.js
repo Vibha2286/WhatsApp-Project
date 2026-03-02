@@ -159,7 +159,7 @@ async function getPayDate({ idNumber, mobileNumber, month, year, pin }) {
 }
 
 async function sendYearList(to) {
-  const years = [2025, 2026, 2027]; // keep ≤10 rows
+  const years = [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017]; // keep ≤10 rows
   const rows = years.map(y => ({ id: y.toString(), title: y.toString() }));
 
   return axios.post(
@@ -185,10 +185,61 @@ async function sendYearList(to) {
     }
   );
 }
+async function sendMonthList(to, selectedYear) {
+    const firstHalf = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN"];
+    const secondHalf = ["JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
 
-async function sendMonthList(to) {
-  const months = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
-  const rows = months.map(m => ({ id: m, title: m }));
+    // Get current year and month
+    const today = new Date();
+    const currentYear = today.getFullYear();
+    const currentMonth = today.getMonth(); // 0-indexed (0 = Jan)
+
+    // Filter first half months
+    const firstHalfFiltered = firstHalf.filter((m, i) => {
+        if (selectedYear < currentYear) return true; // past years, show all
+        return i <= currentMonth; // only months that have occurred
+    });
+
+    const secondHalfFiltered = secondHalf.filter((m, i) => {
+        if (selectedYear < currentYear) return true;
+        return i + 6 <= currentMonth; // offset by 6 for H2
+    });
+
+    const firstHalfRows = firstHalfFiltered.map(m => ({ id: m, title: m }));
+    const secondHalfRows = secondHalfFiltered.map(m => ({ id: m, title: m }));
+
+    return axios.post(
+        `https://graph.facebook.com/v24.0/${process.env.PHONE_NUMBER_ID}/messages`,
+        {
+            messaging_product: "whatsapp",
+            to,
+            type: "interactive",
+            interactive: {
+                type: "list",
+                body: { text: "Select the month:" },
+                action: {
+                    button: "Choose Month",
+                    sections: [
+                        { title: "January - June", rows: firstHalfRows },
+                        { title: "July - December", rows: secondHalfRows }
+                    ]
+                }
+            }
+        },
+        {
+            headers: {
+                Authorization: `Bearer ${process.env.ACCESS_TOKEN}`,
+                "Content-Type": "application/json"
+            }
+        }
+    );
+}
+
+async function sendMonthRangeList(to) {
+  const rows = [
+    { id: "H1", title: "January - June" },
+    { id: "H2", title: "July - December" }
+  ];
 
   return axios.post(
     `https://graph.facebook.com/v24.0/${process.env.PHONE_NUMBER_ID}/messages`,
@@ -198,10 +249,10 @@ async function sendMonthList(to) {
       type: "interactive",
       interactive: {
         type: "list",
-        body: { text: "Select the month:" },
+        body: { text: "Select month range:" },
         action: {
-          button: "Choose Month",
-          sections: [{ title: "Months", rows }]
+          button: "Choose Range",
+          sections: [{ title: "Month Range", rows }]
         }
       }
     },
@@ -223,5 +274,6 @@ module.exports = {
   getStatus,
   getPayDate,
   sendYearList,
-  sendMonthList
+  sendMonthList,
+  sendMonthRangeList
 };
