@@ -1,0 +1,304 @@
+const axios = require("axios");
+const { saveToken, isTokenExpired, getToken } = require("../utils/token-store");
+/**
+ * Validate required environment variables at startup
+ */
+if (!process.env.PHONE_NUMBER_ID || !process.env.ACCESS_TOKEN) {
+    throw new Error("Missing required WhatsApp environment variables.");
+}
+
+/**
+ * Create secure axios instance
+ */
+const whatsappApi = axios.create({
+    baseURL: `https://graph.facebook.com/v24.0/${process.env.PHONE_NUMBER_ID}`,
+    timeout: 60000,
+    headers: {
+        Authorization: `Bearer ${process.env.ACCESS_TOKEN}`,
+        "Content-Type": "application/json",
+    },
+});
+
+
+async function sendRequest(payload) {
+    try {
+        const response = await whatsappApi.post("/messages", payload);
+        return response.data;
+    } catch (error) {
+        console.error("WhatsApp API Error:");
+        console.error(JSON.stringify(error.response?.data || error.message, null, 2));
+        throw new Error("WhatsApp message sending failed");
+    }
+}
+
+/**
+ * Validate phone number
+ */
+function validatePhoneNumber(to) {
+    if (!/^\d{10,15}$/.test(to)) {
+        throw new Error("Invalid phone number format.");
+    }
+}
+
+/**
+ * Send Text Message
+ */
+async function sendText(to, message) {
+
+    if (!message || message.length > 4096) {
+        throw new Error("Invalid message content.");
+    }
+
+    return sendRequest({
+        messaging_product: "whatsapp",
+        to,
+        type: "text",
+        text: { body: message },
+    });
+}
+
+/**
+ * Send Numbered List as Text
+ */
+async function sendNumberedList(to, message, rows = []) {
+    validatePhoneNumber(to);
+
+    if (!Array.isArray(rows) || rows.length === 0) {
+        throw new Error("Rows must be a non-empty array.");
+    }
+
+    const listText = rows
+        .map((r, index) => `${index + 1}. ${r.title}`)
+        .join("\n");
+
+    const finalMessage = `${message}\n\n${listText}`;
+
+    return sendText(to, finalMessage);
+}
+
+/**
+ * Send Interactive Month List
+ */
+async function sendHalfMonths(to, months = [], year) {
+    validatePhoneNumber(to);
+
+    if (!Array.isArray(months) || !year) {
+        throw new Error("Invalid months or year.");
+    }
+
+    const rows = months.map((m) => ({
+        id: `${m}_${year}`,
+        title: `${m.charAt(0).toUpperCase() + m.slice(1).toLowerCase()}, ${year}`,
+    }));
+
+    return sendRequest({
+        messaging_product: "whatsapp",
+        to,
+        type: "interactive",
+        interactive: {
+            type: "list",
+            body: { text: "Select the month:" },
+            action: {
+                button: "Choose Month",
+                sections: [{ title: "Months", rows }],
+            },
+        },
+    });
+}
+
+/**
+ * Send Confirmation Buttons
+ */
+async function sendConfirmationButtons(to) {
+    validatePhoneNumber(to);
+
+    return sendRequest({
+        messaging_product: "whatsapp",
+        to,
+        type: "interactive",
+        interactive: {
+            type: "button",
+            body: { text: "Do you want to navigate to main menu?" },
+            action: {
+                buttons: [
+                    {
+                        type: "reply",
+                        reply: { id: "YES_CONTINUE", title: "Yes" },
+                    },
+                    {
+                        type: "reply",
+                        reply: { id: "CANCEL_CHAT", title: "Cancel" },
+                    },
+                ],
+            },
+        },
+    });
+}
+
+/**
+ * Send Year List
+ */
+async function sendYearList(to) {
+    validatePhoneNumber(to);
+
+    const years = [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017];
+
+    const rows = years.map(y => ({
+        id: y.toString(),
+        title: y.toString()
+    }));
+
+    return sendRequest({
+        messaging_product: "whatsapp",
+        to,
+        type: "interactive",
+        interactive: {
+            type: "list",
+            body: { text: "Select the year:" },
+            action: {
+                button: "Choose Year",
+                sections: [{ title: "Years", rows }]
+            }
+        }
+    });
+}
+
+
+/**
+ * Send Month Range List (H1 / H2)
+ */
+async function sendMonthRangeList(to) {
+    validatePhoneNumber(to);
+
+    const rows = [
+        { id: "H1", title: "January - June" },
+        { id: "H2", title: "July - December" }
+    ];
+
+    return sendRequest({
+        messaging_product: "whatsapp",
+        to,
+        type: "interactive",
+        interactive: {
+            type: "list",
+            body: { text: "Select month range:" },
+            action: {
+                button: "Choose Range",
+                sections: [{ title: "Month Range", rows }]
+            }
+        }
+    });
+}
+
+/**
+ * Send Custom Buttons
+ */
+async function sendButtons(to, bodyText, buttons = []) {
+    validatePhoneNumber(to);
+
+    if (!bodyText || buttons.length === 0) {
+        throw new Error("Body text and buttons are required.");
+    }
+
+    if (buttons.length > 3) {
+        throw new Error("WhatsApp allows maximum 3 buttons.");
+    }
+
+    return sendRequest({
+        messaging_product: "whatsapp",
+        to,
+        type: "interactive",
+        interactive: {
+            type: "button",
+            body: { text: bodyText },
+            action: {
+                buttons: buttons.map(btn => ({
+                    type: "reply",
+                    reply: {
+                        id: btn.id,
+                        title: btn.title
+                    }
+                }))
+            }
+        }
+    });
+}
+
+function formatDate(date) {
+    return date.toISOString().split("T")[0];
+}
+
+async function getLongLivedToken() {
+    try {
+        const response = await axios.get(
+            "https://graph.facebook.com/v24.0/oauth/access_token",
+            {
+                params: {
+                    grant_type: "fb_exchange_token",
+                    client_id: process.env.APP_ID,
+                    client_secret: process.env.APP_SECRET,
+                    fb_exchange_token: process.env.ACCESS_TOKEN
+                }
+            }
+        );
+
+        const token = response.data.access_token;
+        const expiresIn = response.data.expires_in; // seconds
+
+        console.log("Long-lived token obtained");
+
+        const created = new Date();
+        const renew = new Date(created.getTime() + expiresIn * 1000);
+
+        return {
+            access_token: token,
+            createdAt: formatDate(created),
+            renewAt: formatDate(renew)
+        };
+
+    } catch (error) {
+        console.error(
+            "Error fetching long-lived token:",
+            error.response?.data || error.message
+        );
+        throw new Error("Failed to get long-lived token");
+    }
+}
+
+async function ensureToken() {
+    let tokenData = getToken();
+    console.log("Token data loaded:", tokenData);
+
+    if (!tokenData || isTokenExpired(tokenData)) {
+
+        console.log("Token expired or not found. Refreshing...");
+
+        tokenData = await getLongLivedToken();
+
+        saveToken(tokenData);
+
+        process.env.ACCESS_TOKEN = tokenData.access_token;
+
+        console.log("Token refreshed and saved!");
+
+    } else {
+
+        console.log("Token still valid. Using existing token.");
+        process.env.ACCESS_TOKEN = tokenData.access_token;
+
+    }
+
+    return tokenData.access_token;
+}
+
+module.exports = {
+    sendText,
+    sendNumberedList,
+    sendHalfMonths,
+    sendConfirmationButtons,
+    sendYearList,
+    sendMonthRangeList,
+    sendButtons,
+    getLongLivedToken,
+    ensureToken
+};
