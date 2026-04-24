@@ -39,7 +39,6 @@ module.exports = class GraphApi {
         [`${senderPhoneNumberId}`, 'messages'],
         requestBody
       );
-      console.log('API call successful:', response);
       return response;
     } catch (error) {
       console.error('Error making API call:', error);

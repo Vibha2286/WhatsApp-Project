@@ -12,186 +12,225 @@ async function handleMessage(message) {
     const listReplyId = message.interactive?.list_reply?.id;
     const buttonReplyId = message.interactive?.button_reply?.id;
 
+    if (message.type !== "text" && !message.interactive) {
+        return;
+    }
+
     if (!text && !listReplyId && !buttonReplyId) return;
 
-    if (!sessions[from]) sessions[from] = { step: 0 };
+    const SESSION_TIMEOUT = 20 * 60 * 1000;
+    const now = Date.now();
+
+
+    if (!sessions[from]) {
+        if (!text || !/^hi$/i.test(text)) {
+            await FACEBOOKAPI.sendText(from, CONSTANTS.TYPE_HI);
+            return;
+        }
+
+        sessions[from] = {
+            step: 1,
+            lastActivity: now
+        };
+        await FACEBOOKAPI.sendText(from, CONSTANTS.ASK_MOBILE);
+        return;
+    }
+
     const session = sessions[from];
+
+    if (!session) return;
+
+    const last = session.lastActivity || 0;
+
+    if (now - last > SESSION_TIMEOUT) {
+        delete sessions[from];
+        await FACEBOOKAPI.sendText(from, CONSTANTS.TIMEOUT_MESSAGE);
+        return;
+    }
+
+    session.lastActivity = now;
 
     try {
         switch (session.step) {
-            case 0: // Waiting for HI
-                if (/^hi$/i.test(text)) {
-                    await FACEBOOKAPI.sendText(from, CONSTANTS.WELCOME_MESSAGE);
-                    session.step = 1;
-                } else {
-                    await FACEBOOKAPI.sendText(from, "Please type 'HI' to start.");
-                    session.step = 0;
+            case 1: // Ask for Mobile
+             const inputMobile = getInput(message);
+                if (inputMobile?.toLowerCase() === "hi") {
+                    await startSessionOnHi(from, sessions, Date.now());
+                    return;
                 }
-                break;
 
-            case 1: // Ask for ID
-                const beneficiaryID = VAIDATOR.validateId(text);
+                const isValidMobile = VAIDATOR.validateMobile(text);
 
-                if (beneficiaryID === null) {
+                console.log("Mobile Validate Response: ", isValidMobile);
 
+                if (isValidMobile) {
                     try {
-                        const verifyResult = await SRDAPI.verifyID({ idnumber: text });
-                        if (verifyResult.isValid) {
-                            console.log("ID is verified");
-                            session.idNumber = text;
-                            await FACEBOOKAPI.sendText(from, CONSTANTS.ASK_MOBILE);
+                        const otpResult = await SRDAPI.sendOtpBefore({
+                            mobile: text
+                        });
+
+                        // console.log("Send OTP API Response:", otpResult);
+
+                        if (otpResult.status === "sent") {
+                            session.mobile = text;
+                            await FACEBOOKAPI.sendText(from, CONSTANTS.ASK_PIN);
                             session.step = 2;
                         } else {
-                            console.log("ID verification failed");
+                            await FACEBOOKAPI.sendText(from, CONSTANTS.INVALID_MOBILE_NUMBER_ERROR);
                             session.step = 1;
-                            await FACEBOOKAPI.sendText(from, CONSTANTS.INVALID_ID_MESSAGE);
                         }
-                    } catch (err) {
-                        if (err.response?.data?.messages?.includes("party not found")) {
-                            await FACEBOOKAPI.sendText(from, CONSTANTS.INVALID_ID_MESSAGE);
-                        } else if (err.response?.data?.messages?.includes('invalid identity')) {
-                            await FACEBOOKAPI.sendText(from, "invalid name or surname");
-                        } else if (err.response?.data?.messages?.includes('party already reapplied')) {
-                            await FACEBOOKAPI.sendText(from, "grant application already active");
-                        } else if (err.response?.data?.messages?.includes('invalid identify request')) {
-                            await FACEBOOKAPI.sendText(from, "invalid request");
-                        } else if (err.response?.data?.messages?.includes('party already in referred status')) {
-                            await FACEBOOKAPI.sendText(from, "party already in referred status");
-                        } else if (err.response?.data?.messages?.includes('missing token')) {
-                            await FACEBOOKAPI.sendText(from, "Token is missing");
-                        } else if (err.response?.data?.messages?.includes('invalid identify request')) {
-                            await FACEBOOKAPI.sendText(from, "invalid request");
-                        } else if (err.response?.data?.messages?.includes('Reverification exceeds the limit')) {
-                            await FACEBOOKAPI.sendText(from, "Reverification exceeds the limit");
+
+                    } catch (error) {
+
+                        const errorMessage = error?.response?.data?.message || error?.response?.data?.messages?.[0] || error.message || "unknown error";
+                        console.error("OTP Flow Error:", errorMessage);
+                        if (errorMessage == "send sms error") {
+                            await FACEBOOKAPI.sendText(from, CONSTANTS.SMS_SENT_ERROR);
+                        } else if (errorMessage == "interval exception") {
+                            await FACEBOOKAPI.sendText(from, CONSTANTS.INTERVAL_EXCEPTION);
+                        } else if (errorMessage == "invalid token") {
+                            await FACEBOOKAPI.sendText(from, CONSTANTS.INVALID_TOKEN_ERROR);
                         }
                         session.step = 1;
                     }
+
                 } else {
                     session.step = 1;
-                    await FACEBOOKAPI.sendText(from, "Please enter a valid 13-digit South African ID number.");
+                    await FACEBOOKAPI.sendText(from, CONSTANTS.INVALID_MOBILE_NUMBER_ERROR);
                 }
+
                 break;
 
-            case 2: // Ask for mobile
-                const isValidMobile = VAIDATOR.validateMobile(text);
-
-                if (isValidMobile) {
-                    session.mobile = text;
-
-                    // Call mobile verification API
-                    try {
-                        const mobileResult = await SRDAPI.verifyMobile({
-                            idNumber: session.idNumber,  // from step 1
-                            mobile: text           // entered by user
-                        });
-
-                        if (mobileResult.isRegistered) {   // assuming API returns isValid
-                            console.log("Mobile verified", mobileResult);
-                            session.mobile = text;
-                            try {
-                                const otpResult = await SRDAPI.sendOtp({
-                                    idNumber: session.idNumber,
-                                    mobile: text
-                                });
-
-                                if (otpResult.status === "sent") {
-                                    console.log("OTP sent", otpResult);
-                                    session.mobile = text;
-                                    await FACEBOOKAPI.sendText(from, CONSTANTS.ASK_PIN);
-                                    session.step = 3;
-                                } else {
-                                    console.log("OTP sending failed", otpResult);
-                                    await FACEBOOKAPI.sendText(from, "Invalid mobile number. Please enter a valid South African mobile number.");
-                                    session.step = 2;
-                                }
-                            } catch (err) {
-                                console.error("Error verifying mobile:", err.message);
-                                if (err.message == "invalid id number") {
-                                    await FACEBOOKAPI.sendText(from, "invalid id number");
-                                } else if (err.message == "invalid phone number") {
-                                    await FACEBOOKAPI.sendText(from, "invalid phone number");
-                                } else if (err.message == "interval exception") {
-                                    await FACEBOOKAPI.sendText(from, "An OTP has already been sent. Please wait 15 minutes before requesting a new one");
-                                } else if (err.message == "send sms error") {
-                                    await FACEBOOKAPI.sendText(from, "failed to send sms, please try again later");
-                                } else if (err.message == "party details not found") {
-                                    await FACEBOOKAPI.sendText(from, "Beneficiary not found.");
-                                }
-                                session.step = 2;
-                            }
-
-                        } else {
-                            console.log("Mobile verification failed ❌", mobileResult);
-                            await FACEBOOKAPI.sendText(from, "Invalid mobile number. Please enter a valid South African mobile number.");
-                            session.step = 2;
-                        }
-                    } catch (err) {
-                        console.error("Error verifying mobile:", err.message);
-
-                        if (err.message == "id mandatory") {
-                            await FACEBOOKAPI.sendText(from, "Id number is mandatory");
-                        } else if (err.message == "party details not found") {
-                            await FACEBOOKAPI.sendText(from, "Beneficiary not found.");
-                        } else if (err.message == "invalid identify request") {
-                            await FACEBOOKAPI.sendText(from, 'We are unable to process your request. Please try again later');
-                        } else if (err.message == "application is not completed") {
-                            await FACEBOOKAPI.sendText(from, 'Your SRD grant application is incomplete ');
-                        } else if (err.message == "invalid token") {
-                            await FACEBOOKAPI.sendText(from, 'invalid pin');
-                        } else if (err.message == "invalid bank details") {
-                            await FACEBOOKAPI.sendText(from, 'Invalid bank details');
-                        }
-                        await FACEBOOKAPI.sendText(from, "Invalid mobile number. Please enter a valid South African mobile number.");
-                        session.step = 2;
-                    }
-
-                } else {
-                    session.step = 2;
-                    await FACEBOOKAPI.sendText(from, "Invalid mobile number. Please enter a valid South African mobile number.");
+            case 2: // Ask for OTP
+                const inputtext = getInput(message);
+                if (inputtext?.toLowerCase() === "hi") {
+                    await startSessionOnHi(from, sessions, Date.now());
+                    return;
                 }
-                break;
-
-            case 3: // Ask for OTP
                 const isValidPin = VAIDATOR.validatePin(text);
                 if (!isValidPin) {
-                    await FACEBOOKAPI.sendText(from, "Invalid PIN. Please enter a valid 6-digit PIN.");
-                    session.step = 3;
+                    await FACEBOOKAPI.sendText(from, CONSTANTS.INVALID_PIN);
+                    session.step = 2;
                     break;
                 }
                 try {
-                    const otpResult = await SRDAPI.verifyOtp({
-                        idNumber: session.idNumber,
+                    const otpResult = await SRDAPI.verifyOtpBefore({
                         mobile: session.mobile,
                         pin: text
                     });
                     if (otpResult.verified) {
                         session.pin = text;
-                        console.log("OTP Verified:", otpResult);
-                        await FACEBOOKAPI.sendNumberedList(
-                            from,
-                            CONSTANTS.OPTIONS_MESSAGE,
-                            CONSTANTS.REPLY_INTERACTIVE_WITH_MEDIA_CTAS
-                        );
-                        session.step = 4;
+                        if (!session.idNumber) {
+                            await FACEBOOKAPI.sendText(from, CONSTANTS.ASK_ID_MESSAGE);
+                            session.step = 3;
+                        } else {
+                            await FACEBOOKAPI.sendNumberedList(
+                                from,
+                                CONSTANTS.OPTIONS_MESSAGE,
+                                CONSTANTS.REPLY_INTERACTIVE_WITH_MEDIA_CTAS
+                            );
+                            session.step = 4;
+                        }
                     } else {
-                        console.log("OTP verification failed", otpResult);
-                        await FACEBOOKAPI.sendText(from, "The OTP you entered is incorrect. Please check and try again.");
-                        session.step = 3;
+                        await FACEBOOKAPI.sendText(from, CONSTANTS.INVALID_OTP_MESSAGE);
+                        session.step = 2;
                     }
 
-                } catch (err) {
-                    console.error("Error verifying OTP:", err.message);
-                    await FACEBOOKAPI.sendText(from, "The OTP you entered is incorrect. Please check and try again.");
-                    session.step = 3;
+                } catch (error) {
+                    await FACEBOOKAPI.sendText(from, CONSTANTS.INVALID_OTP_MESSAGE);
+                    session.step = 2;
                 }
+
+                break;
+
+            case 3: // Ask for ID Number
+                const inputValue = getInput(message);
+                if (inputValue?.toLowerCase() === "hi") {
+                    await startSessionOnHi(from, sessions, Date.now());
+                    return;
+                }
+                const beneficiaryID = VAIDATOR.validateId(text);
+                if (beneficiaryID === null) {
+
+                    try {
+                        const verifyResult = await SRDAPI.verifyID({ idnumber: text });
+                        if (verifyResult.isValid) {
+
+                            // Call mobile verification API
+                            try {
+                                const mobileResult = await SRDAPI.verifyMobile({
+                                    idNumber: text,
+                                    mobile: session.mobile
+                                });
+
+                                if (mobileResult.isRegistered) {
+                                    session.mobile = session.mobile;
+                                    session.idNumber = text;
+                                    await FACEBOOKAPI.sendNumberedList(
+                                        from,
+                                        CONSTANTS.OPTIONS_MESSAGE,
+                                        CONSTANTS.REPLY_INTERACTIVE_WITH_MEDIA_CTAS
+                                    );
+                                    session.step = 4;
+
+                                } else {
+                                    await FACEBOOKAPI.sendText(from, CONSTANTS.INVALID_MOBILE_NUMBER_MESSAGE);
+                                    session.step = 1;
+                                }
+                            } catch (error) {
+
+                                const errorMessage = error?.response?.data?.message || error?.response?.data?.messages?.[0] || error.message || "unknown error";
+
+                                if (errorMessage == "id mandatory") {
+                                    await FACEBOOKAPI.sendText(from, CONSTANTS.INVALID_ID_ENTER);
+                                    session.step = 1;
+                                } else if (errorMessage == "party not found") {
+                                    await FACEBOOKAPI.sendText(from, CONSTANTS.INVALID_ID_MESSAGE);
+                                    session.step = 1;
+                                } else if (errorMessage == "mobile mandatory") {
+                                    await FACEBOOKAPI.sendText(from, CONSTANTS.MOBILE_MANDATORY);
+                                    session.step = 1;
+                                } else if (errorMessage == "Mobile number does not match the provided idnumber") {
+                                    await FACEBOOKAPI.sendText(from, CONSTANTS.MOBILE_NOT_MATCH_WITH_ID);
+                                    session.step = 3;
+                                } else {
+                                    await FACEBOOKAPI.sendText(from, CONSTANTS.INVALID_MOBILE_NUMBER_ERROR);
+                                    session.step = 1;
+                                }
+
+                            }
+
+                        } else {
+                            session.step = 3;
+                            await FACEBOOKAPI.sendText(from, CONSTANTS.INVALID_ID_MESSAGE);
+                        }
+                    } catch (error) {
+                        if (error.response?.data?.messages?.includes("party not found")) {
+                            await FACEBOOKAPI.sendText(from, CONSTANTS.INVALID_ID_MESSAGE);
+                        } else if (error.response?.data?.messages?.includes('id mandatory')) {
+                            await FACEBOOKAPI.sendText(from, CONSTANTS.INVALID_ID_ENTER);
+                        }
+                        session.step = 3;
+                    }
+                } else {
+                    session.step = 3;
+                    await FACEBOOKAPI.sendText(from, CONSTANTS.VALID_ID_NUMBER);
+                }
+
                 break;
 
             case 4:
-                switch (text) {
+                const userInput = getInput(message);
+
+                if (userInput?.toLowerCase() === "hi") {
+                    await startSessionOnHi(from, sessions, Date.now());
+                    return;
+                }
+
+                if (!userInput) return;
+
+                switch (userInput) {
                     case "1":
-                        console.error("ID", session.idNumber);
-                        console.error("Mobile", session.mobile);
-                        console.error("OTP:", session.pin);
 
                         try {
                             const applicationStatus = await SRDAPI.getStatus({
@@ -202,30 +241,44 @@ async function handleMessage(message) {
 
                             if (applicationStatus.status) {
                                 if (applicationStatus.status == "completed") {
-                                    await FACEBOOKAPI.sendText(from, `Application is Completed.`);
+                                    await FACEBOOKAPI.sendText(from, CONSTANTS.APPICATION_COMPLETED);
                                 } else if (applicationStatus.status == "incomplete" || applicationStatus.status == "bank_pending" || applicationStatus.status == "reapply_pending" || applicationStatus.status == "high_risk") {
-                                    await FACEBOOKAPI.sendText(from, `Your application is incomplete. Please complete is using the link below. \nhttps://srd.sassa.gov.za`);
+                                    await FACEBOOKAPI.sendText(from, CONSTANTS.APPLICATION_INCOMPLETE);
                                 } else if (applicationStatus.status == "cancelled") {
-                                    await FACEBOOKAPI.sendText(from, `Your application is cancelled. Please use the following link to reinstate your application. \nhttps://srd.sassa.gov.za/sc19/reinstate`);
+                                    await FACEBOOKAPI.sendText(from, CONSTANTS.APPLICATION_CANCELLED);
                                 } else {
-                                    await FACEBOOKAPI.sendText(from, `Failed to retrieve application status.`);
+                                    await FACEBOOKAPI.sendText(from, CONSTANTS.APPLICATION_FAILED);
                                 }
                                 await FACEBOOKAPI.sendConfirmationButtons(from);
                                 session.step = 9;
                             } else {
-                                await FACEBOOKAPI.sendText(from, "Failed to retrieve application status.");
+                                await FACEBOOKAPI.sendText(from, CONSTANTS.APPLICATION_FAILED);
                                 await FACEBOOKAPI.sendConfirmationButtons(from);
                                 session.step = 9;
                             }
                         } catch (error) {
-                            console.error("Outcome API Error:", error.response?.data || error.message);
-                            await FACEBOOKAPI.sendText(from, `Failed to retrieve application status.`);
+                            const errorMessage = error?.response?.data?.message || error?.response?.data?.messages?.[0] || error.message || "unknown error";
+                            if (errorMessage == "id mandatory") {
+                                await FACEBOOKAPI.sendText(from, CONSTANTS.INVALID_ID_ENTER);
+                            } else if (errorMessage == "party not found") {
+                                await FACEBOOKAPI.sendText(from, CONSTANTS.INVALID_ID_MESSAGE);
+                            } else if (errorMessage == "mobile mandatory") {
+                                await FACEBOOKAPI.sendText(from, CONSTANTS.MOBILE_MANDATORY);
+                            } else if (errorMessage == "Mobile number does not match the provided idnumber") {
+                                await FACEBOOKAPI.sendText(from, CONSTANTS.MOBILE_NOT_MATCH);
+                            } else if (errorMessage == "missing token") {
+                                await FACEBOOKAPI.sendText(from, CONSTANTS.MISSING_TOKEN);
+                            } else if (errorMessage == "invalid token") {
+                                await FACEBOOKAPI.sendText(from, CONSTANTS.INVALID_TOKEN_ERROR);
+                            } else {
+                                await FACEBOOKAPI.sendText(from, CONSTANTS.APPLICATION_FAILED);
+                            }
+                            session.step = 4;
                             await FACEBOOKAPI.sendNumberedList(
                                 from,
                                 CONSTANTS.OPTIONS_MESSAGE,
                                 CONSTANTS.REPLY_INTERACTIVE_WITH_MEDIA_CTAS
                             );
-                            session.step = 4;
                         }
                         break;
 
@@ -241,11 +294,23 @@ async function handleMessage(message) {
                         session.step = 5;
                         break;
 
+                    case "4":
+                        await FACEBOOKAPI.sendText(from, CONSTANTS.MOBILE_NUMBER_UPDATE);
+                        await FACEBOOKAPI.sendConfirmationButtons(from);
+                        session.step = 9;
+                        break;
+
+                    case "5":
+                        await FACEBOOKAPI.sendText(from, CONSTANTS.BANK_NUMBER_UPDATE);
+                        await FACEBOOKAPI.sendConfirmationButtons(from);
+                        session.step = 9;
+                        break;
+
                     default:
                         session.step = 4;
                         await FACEBOOKAPI.sendNumberedList(
                             from,
-                            "Invalid option. Reply with one of the menu numbers.",
+                            CONSTANTS.INVALID_OPTION,
                             CONSTANTS.REPLY_INTERACTIVE_WITH_MEDIA_CTAS
                         );
                         break;
@@ -253,7 +318,11 @@ async function handleMessage(message) {
                 break;
 
             case 5: // Waiting for year selection
-
+                const inputDate = getInput(message);
+                if (inputDate?.toLowerCase() === "hi") {
+                    await startSessionOnHi(from, sessions, Date.now());
+                    return;
+                }
                 if (!listReplyId) {
                     await FACEBOOKAPI.sendText(from, "Please select a year from the list.");
                     return;
@@ -266,6 +335,11 @@ async function handleMessage(message) {
                 break;
 
             case 6: // Waiting for month selection
+                const inputRange = getInput(message);
+                if (inputRange?.toLowerCase() === "hi") {
+                    await startSessionOnHi(from, sessions, Date.now());
+                    return;
+                }
 
                 if (!listReplyId) {
                     await FACEBOOKAPI.sendText(from, "Please select a range.");
@@ -284,6 +358,11 @@ async function handleMessage(message) {
                 break;
 
             case 7: // Waiting for month
+                const inputMonth = getInput(message);
+                if (inputMonth?.toLowerCase() === "hi") {
+                    await startSessionOnHi(from, sessions, Date.now());
+                    return;
+                }
 
                 if (!listReplyId) {
                     await FACEBOOKAPI.sendText(from, "Please select a month.");
@@ -296,8 +375,6 @@ async function handleMessage(message) {
                 const monthYear = session.selectedMonth;
                 const monthAbbr = monthYear.split("_")[0];
                 const month = monthAbbr.charAt(0).toUpperCase() + monthAbbr.slice(1).toLowerCase();
-
-                console.log(month.toUpperCase());
 
                 if (session.selectedMenu === "PAYMENT_STATUS") {
                     try {
@@ -312,42 +389,65 @@ async function handleMessage(message) {
                         const status = outcome.status?.trim() ?? "";
                         if (status === "") {
                             if (outcome?.outcome == "approved") {
-                                await FACEBOOKAPI.sendText(from, `Your Payment status is Approved`);
+                                await FACEBOOKAPI.sendText(from, CONSTANTS.PAYMENT_APPROVED);
                             } else if (outcome?.outcome == "declined") {
                                 const reasonMessage = CONSTANTS.REJECTION_MESSAGES[outcome.reason];
                                 await FACEBOOKAPI.sendText(from, `Your Payment status is Declined. Reason: ${reasonMessage}`);
                             } else if (outcome?.outcome == "pending") {
-                                await FACEBOOKAPI.sendText(from, `Your Payment status is Pending`);
+                                await FACEBOOKAPI.sendText(from, CONSTANTS.PAYMENT_PENDING);
                             } else if (outcome?.outcome == "referred") {
-                                await FACEBOOKAPI.sendText(from, `Your Payment has been Referred. Kindly use the link below to complete your identy verification process. \nhttps://srd.sassa.gov.za/sc19/ekyc/referredstatus`);
+                                await FACEBOOKAPI.sendText(from, CONSTANTS.PAYMENT_REFERRED);
                             } else if (outcome?.outcome == "archived") {
-                                await FACEBOOKAPI.sendText(from, `Your Payment has been Archived. Kindly contact the SASSA call centre email: supportcenter@sassa.gov.za or ca;; 0800 60 10 11 for assistance.`);
+                                await FACEBOOKAPI.sendText(from, CONSTANTS.PAYMENT_ARCHIVED);
                             } else if (outcome?.outcome == "canceled") {
-                                await FACEBOOKAPI.sendText(from, `Your Payment has been Canceled. Please use the following link to reinstate your application. \nhttps://srd.sassa.gov.za/sc19/reinstate`);
+                                await FACEBOOKAPI.sendText(from, CONSTANTS.PAYMENT_CANCELED);
                             } else {
-                                await FACEBOOKAPI.sendText(from, `Failed to retrieve outcome status.`);
+                                await FACEBOOKAPI.sendText(from, CONSTANTS.PAYMENT_FAILED);
                             }
                         } else {
                             if (outcome.status == "incomplete"
                                 || outcome.status == "bank_pending"
                                 || outcome.status == "reapply_pending"
                                 || outcome.status == "high_risk") {
-                                await FACEBOOKAPI.sendText(from, `Your application is incomplete. Please complete is using the link below. \nhttps://srd.sassa.gov.za`);
+                                await FACEBOOKAPI.sendText(from, CONSTANTS.APPLICATION_INCOMPLETE);
                             } else if (outcome.status == "cancelled") {
-                                await FACEBOOKAPI.sendText(from, `Your application is cancelled. Please use the following link to reinstate your application. \nhttps://srd.sassa.gov.za/sc19/reinstate`);
+                                await FACEBOOKAPI.sendText(from, CONSTANTS.APPLICATION_CANCELLED);
                             }
                         }
                         await FACEBOOKAPI.sendConfirmationButtons(from);
                         session.step = 9;
                     } catch (error) {
-                        console.error("Outcome API Error:", error.response?.data || error.message);
-                        await FACEBOOKAPI.sendText(from, `Outcome not found for the selected month.`);
+                        session.step = 4;
+                        const errorMessage = error?.response?.data?.message || error?.response?.data?.messages?.[0] || error.message || "unknown error";
+                        if (errorMessage == "id mandatory") {
+                            await FACEBOOKAPI.sendText(from, CONSTANTS.INVALID_ID_ENTER);
+                        } else if (errorMessage == "party not found") {
+                            await FACEBOOKAPI.sendText(from, CONSTANTS.INVALID_ID_MESSAGE);
+                        } else if (errorMessage == "mobile mandatory") {
+                            await FACEBOOKAPI.sendText(from, CONSTANTS.MOBILE_MANDATORY);
+                        } else if (errorMessage == "Mobile number does not match the provided idnumber") {
+                            await FACEBOOKAPI.sendText(from, CONSTANTS.MOBILE_NOT_MATCH);
+                        } else if (errorMessage == "missing token") {
+                            await FACEBOOKAPI.sendText(from, CONSTANTS.MISSING_TOKEN);
+                        } else if (errorMessage == "invalid token") {
+                            await FACEBOOKAPI.sendText(from, CONSTANTS.INVALID_TOKEN_ERROR);
+                        } else if (errorMessage == "month mandatory") {
+                            await FACEBOOKAPI.sendText(from, CONSTANTS.SELECT_MONTH);
+                        } else if (errorMessage == "year mandatory") {
+                            await FACEBOOKAPI.sendText(from, CONSTANTS.SELECT_YEAR);
+                        } else if (errorMessage == "Period invalid") {
+                            await FACEBOOKAPI.sendText(from, CONSTANTS.INVALID_PERIOD);
+                        } else if (errorMessage == "outcome not found") {
+                            await FACEBOOKAPI.sendText(from, CONSTANTS.NO_OUTCOME_FOUND);
+                        } else {
+                            await FACEBOOKAPI.sendText(from, CONSTANTS.NO_OUTCOME_FOUND);
+                        }
+                        session.step = 4;
                         await FACEBOOKAPI.sendNumberedList(
                             from,
                             CONSTANTS.OPTIONS_MESSAGE,
                             CONSTANTS.REPLY_INTERACTIVE_WITH_MEDIA_CTAS
                         );
-                        session.step = 4;
                     }
 
                 } else if (session.selectedMenu === "PAYMENT_DATE") {
@@ -364,7 +464,7 @@ async function handleMessage(message) {
                         if (payDatestatus.outcome == "approved") {
 
                             if (!payDatestatus.paid || payDatestatus.paid.trim() === "") {
-                                await FACEBOOKAPI.sendText(from, "Your payment is not yet made for this month.");
+                                await FACEBOOKAPI.sendText(from, CONSTANTS.PAYMENT_NOT_MADE);
                                 await FACEBOOKAPI.sendConfirmationButtons(from);
                                 session.step = 9;
                             } else {
@@ -380,81 +480,136 @@ async function handleMessage(message) {
                                     const reasonMessage = CONSTANTS.REJECTION_MESSAGES[payDatestatus.reason];
                                     await FACEBOOKAPI.sendText(from, `Your Payment status is Declined. Reason: ${reasonMessage}`);
                                 } else if (payDatestatus?.outcome == "pending") {
-                                    await FACEBOOKAPI.sendText(from, `Your Payment status is Pending`);
+                                    await FACEBOOKAPI.sendText(from, CONSTANTS.PAYMENT_PENDING);
                                 } else if (payDatestatus?.outcome == "referred") {
-                                    await FACEBOOKAPI.sendText(from, `Your Payment has been Referred. Kindly use the link below to complete your identy verification process. \nhttps://srd.sassa.gov.za/sc19/ekyc/referredstatus`);
+                                    await FACEBOOKAPI.sendText(from, CONSTANTS.PAYMENT_REFERRED);
                                 } else if (payDatestatus?.outcome == "archived") {
-                                    await FACEBOOKAPI.sendText(from, `Your Payment has been Archived. Kindly contact the SASSA call centre email: supportcenter@sassa.gov.za or ca;; 0800 60 10 11 for assistance.`);
+                                    await FACEBOOKAPI.sendText(from, CONSTANTS.PAYMENT_ARCHIVED);
                                 } else if (payDatestatus?.outcome == "canceled") {
-                                    await FACEBOOKAPI.sendText(from, `Your Payment has been Canceled. Please use the following link to reinstate your application. \nhttps://srd.sassa.gov.za/sc19/reinstate`);
+                                    await FACEBOOKAPI.sendText(from, CONSTANTS.PAYMENT_CANCELED);
                                 }
                             } else {
                                 if (payDatestatus.status == "incomplete"
                                     || payDatestatus.status == "bank_pending"
                                     || payDatestatus.status == "reapply_pending"
                                     || payDatestatus.status == "high_risk") {
-                                    await FACEBOOKAPI.sendText(from, `Your application is incomplete. Please complete is using the link below. \nhttps://srd.sassa.gov.za`);
+                                    await FACEBOOKAPI.sendText(from, CONSTANTS.APPLICATION_INCOMPLETE);
                                 } else if (payDatestatus.status == "cancelled") {
-                                    await FACEBOOKAPI.sendText(from, `Your application is cancelled. Please use the following link to reinstate your application. \nhttps://srd.sassa.gov.za/sc19/reinstate`);
+                                    await FACEBOOKAPI.sendText(from, CONSTANTS.APPLICATION_CANCELLED);
                                 }
                             }
                             await FACEBOOKAPI.sendConfirmationButtons(from);
                             session.step = 9;
                         }
                     } catch (error) {
-                        console.error("Outcome API Error:", error.response?.data || error.message);
-                        await FACEBOOKAPI.sendText(from, `Outcome not found for the selected month.`);
+
+                        const errorMessage = error?.response?.data?.message || error?.response?.data?.messages?.[0] || error.message || "unknown error";
+                        if (errorMessage == "id mandatory") {
+                            await FACEBOOKAPI.sendText(from, CONSTANTS.INVALID_ID_ENTER);
+                        } else if (errorMessage == "party not found") {
+                            await FACEBOOKAPI.sendText(from, CONSTANTS.INVALID_ID_MESSAGE);
+                        } else if (errorMessage == "mobile mandatory") {
+                            await FACEBOOKAPI.sendText(from, CONSTANTS.MOBILE_MANDATORY);
+                        } else if (errorMessage == "Mobile number does not match the provided idnumber") {
+                            await FACEBOOKAPI.sendText(from, CONSTANTS.MOBILE_NOT_MATCH);
+                        } else if (errorMessage == "missing token") {
+                            await FACEBOOKAPI.sendText(from, CONSTANTS.MISSING_TOKEN);
+                        } else if (errorMessage == "invalid token") {
+                            await FACEBOOKAPI.sendText(from, CONSTANTS.INVALID_TOKEN_ERROR);
+                        } else if (errorMessage == "month mandatory") {
+                            await FACEBOOKAPI.sendText(from, CONSTANTS.SELECT_MONTH);
+                        } else if (errorMessage == "year mandatory") {
+                            await FACEBOOKAPI.sendText(from, CONSTANTS.SELECT_YEAR);
+                        } else if (errorMessage == "Period invalid") {
+                            await FACEBOOKAPI.sendText(from, CONSTANTS.INVALID_PERIOD);
+                        } else if (errorMessage == "outcome not found") {
+                            await FACEBOOKAPI.sendText(from, CONSTANTS.NO_OUTCOME_FOUND);
+                        } else {
+                            await FACEBOOKAPI.sendText(from, CONSTANTS.NO_OUTCOME_FOUND);
+                        }
+                        session.step = 4;
                         await FACEBOOKAPI.sendNumberedList(
                             from,
                             CONSTANTS.OPTIONS_MESSAGE,
                             CONSTANTS.REPLY_INTERACTIVE_WITH_MEDIA_CTAS
                         );
-                        session.step = 4;
+
                     }
                 }
                 break;
 
             case 8:
+                const OTP = getInput(message);
+                if (OTP?.toLowerCase() === "hi") {
+                    await startSessionOnHi(from, sessions, Date.now());
+                    return;
+                }
                 const otpResult = await SRDAPI.sendOtp({
                     idNumber: session.idNumber,
                     mobile: session.mobile
                 });
 
                 if (otpResult.status === "sent") {
-                    console.log("OTP sent", otpResult);
                     await FACEBOOKAPI.sendText(from, CONSTANTS.ASK_PIN);
-                    session.step = 3;
+                    session.step = 2;
                 } else {
-                    await FACEBOOKAPI.sendText(from, "The OTP you entered is incorrect. Please check and try again.");
+                    await FACEBOOKAPI.sendText(from, CONSTANTS.INVALID_OTP_MESSAGE);
                     session.step = 8;
                 }
                 break;
 
             case 9: // Confirmation Step
-                console.log("Button Reply ID:", buttonReplyId, "Message Type:", message.type);
 
-                if (buttonReplyId === "YES_CONTINUE" || buttonReplyId === "Yes") {
+                const input = getInput(message);
 
-                    session.step = 0;
+                if (!input) return;
+                if (input === "YES_CONTINUE" || input.toLowerCase() === "yes") {
 
-                } else if (buttonReplyId === "CANCEL_CHAT" || buttonReplyId === "Cancel") {
+                    try {
+                        const otpResult = await SRDAPI.sendOtp({
+                            idNumber: session.idNumber,
+                            mobile: session.mobile
+                        });
 
-                    await FACEBOOKAPI.sendText(from, "Thank you for using our SASSA WhatsApp service. Goodbye 👋");
+                        if (otpResult.status === "sent") {
+                            await FACEBOOKAPI.sendText(from, CONSTANTS.REENTER_PIN);
+                            session.step = 2;
+                        } else {
+                            await FACEBOOKAPI.sendText(from, CONSTANTS.INVALID_MOBILE_NUMBER_ERROR);
+                            session.step = 1;
+                        }
+                    } catch (error) {
+                        const errorMessage = error?.response?.data?.message || error?.response?.data?.messages?.[0] || error.message || "unknown error";
+                        if (errorMessage == "send sms error") {
+                            await FACEBOOKAPI.sendText(from, CONSTANTS.SMS_SENT_ERROR);
+                        } else if (errorMessage == "interval exception") {
+                            await FACEBOOKAPI.sendText(from, CONSTANTS.INTERVAL_EXCEPTION);
+                        } else if (errorMessage == "invalid token") {
+                            await FACEBOOKAPI.sendText(from, CONSTANTS.INVALID_TOKEN_ERROR);
+                        }
+                        session.step = 1;
+                    }
 
-                    // Clear session
+                } else if (input === "CANCEL_CHAT" || input.toLowerCase() === "cancel") {
+
+                    await FACEBOOKAPI.sendText(from, CONSTANTS.CANCEL_MESSAGE);
                     delete sessions[from];
 
                 } else {
-                    await FACEBOOKAPI.sendText(from, "Please select Yes or Cancel.");
+                    await FACEBOOKAPI.sendText(from, CONSTANTS.SELECT_YES_CANCEL);
                 }
 
                 break;
 
             default:
-                session.step = 0;
+                // session.step = 0;
+                session.step = 1;
+                await FACEBOOKAPI.sendText(from, CONSTANTS.TYPE_HI);
         }
-    } catch (err) {
-        console.error("Error handling message:", err.response?.data || err.message);
+
+
+    } catch (error) {
+        console.error("Error handling message:", error.response?.data || error.message);
     }
 }
 
@@ -464,10 +619,51 @@ function formatDate(dateStr) {
 
     const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-    const formattedMonth = monthNames[month - 1]; // month is 1-indexed
+    const formattedMonth = monthNames[month - 1];
     return `${day} ${formattedMonth}, ${year}`;
+}
+
+async function startSessionOnHi(from, sessions, now) {
+    delete sessions[from];
+    sessions[from] = {
+        step: 1,
+        lastActivity: now
+    };
+    await FACEBOOKAPI.sendText(from, CONSTANTS.REENTER_MOBILE);
 }
 
 module.exports = {
     handleMessage,
 };
+
+
+setInterval(async () => {
+    const now = Date.now();
+
+    for (const key of Object.keys(sessions)) {
+        const session = sessions[key];
+
+        if (session && session.lastActivity) {
+            if (now - session.lastActivity > 20 * 60 * 1000) {
+                console.log(`Cleaning expired session for ${key}`);
+
+                await FACEBOOKAPI.sendText(
+                    key,
+                    CONSTANTS.TIMEOUT_MESSAGE
+                );
+                session.timeoutSent = true;
+
+                delete sessions[key];
+            }
+        }
+    }
+}, 1 * 60 * 1000);
+
+function getInput(message) {
+    return (
+        message?.interactive?.list_reply?.id ||
+        message?.interactive?.button_reply?.id ||
+        message?.text?.body?.trim() ||
+        null
+    );
+}

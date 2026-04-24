@@ -4,10 +4,9 @@ async function verifyID({ idnumber }) {
   try {
     const response = await axios.post(
       `${process.env.API_BASE_URL}srdweb/api/whatsapp/idverify`,
-      { idNumber: idnumber } 
+      { idNumber: idnumber }
     );
 
-    console.log("API Response:", response.data);
     return response.data;
 
   } catch (error) {
@@ -27,7 +26,6 @@ async function verifyMobile({ idNumber, mobile }) {
       }
     );
 
-    console.log("API Response:", response.data);
     return response.data;
 
   } catch (error) {
@@ -44,14 +42,10 @@ async function verifyMobile({ idNumber, mobile }) {
 
 async function sendOtp({ idNumber, mobile }) {
   try {
-    console.log("Calling OTP API...", idNumber, mobile);
-
     const response = await axios.post(
       `${process.env.API_BASE_URL}srdweb/api/whatsapp/otp`,
       { idNumber, mobile }
     );
-
-    console.log("OTP API Response:", response.data);
     return response.data;
 
   } catch (error) {
@@ -60,16 +54,44 @@ async function sendOtp({ idNumber, mobile }) {
   }
 }
 
+async function sendOtpBefore({ mobile }) {
+  try {
+    const response = await axios.post(
+      `${process.env.API_BASE_URL}srdweb/api/web/otp`,
+      { mobile }
+    );
+    //  console.error("Send OTP API Response: ", response);
+    return response.data;
+
+  } catch (error) {
+    console.log(`URL: ${process.env.API_BASE_URL}/srdweb/api/web/otp`);
+    console.error("OTP API Error:", error.message);
+    throw error;
+  }
+}
+
 async function verifyOtp({ idNumber, mobile, pin }) {
   try {
-    console.log("Calling OTP PATCH API...", idNumber, mobile, pin);
-
     const response = await axios.patch(
       `${process.env.API_BASE_URL}srdweb/api/whatsapp/otp`,
       { idNumber, mobile, pin }
     );
+    return response.data;
 
-    console.log("OTP Verify API Response:", response.data);
+  } catch (error) {
+    console.error("OTP Verify API Error:", error.message);
+    throw error;
+  }
+}
+
+
+async function verifyOtpBefore({ mobile, pin }) {
+  try {
+    const response = await axios.patch(
+      `${process.env.API_BASE_URL}srdweb/api/web/otp/max`,
+      { mobile, pin }
+    );
+    //  console.error("Verify OTP API Response: ", response.data);
     return response.data;
 
   } catch (error) {
@@ -80,8 +102,6 @@ async function verifyOtp({ idNumber, mobile, pin }) {
 
 async function getOutcome({ idNumber, mobile, month, year, pin }) {
   try {
-    console.log("Calling Outcome API...", idNumber, mobile, month, year, pin);
-
     const response = await axios.post(
       `${process.env.API_BASE_URL}srdweb/api/whatsapp/outcome`,
       {
@@ -93,7 +113,6 @@ async function getOutcome({ idNumber, mobile, month, year, pin }) {
       }
     );
 
-    console.log("Outcome API Response:", response.data);
     return response.data;
 
   } catch (error) {
@@ -112,14 +131,11 @@ async function getOutcome({ idNumber, mobile, month, year, pin }) {
  */
 async function getStatus({ idNumber, mobile, pin }) {
   try {
-    console.log("Calling Status API...", idNumber, mobile, pin);
 
     const response = await axios.post(
       `${process.env.API_BASE_URL}srdweb/api/whatsapp/status`,
       { idNumber, mobile, pin }
     );
-
-    console.log("Status API Response:", response.data);
     return response.data;
 
   } catch (error) {
@@ -138,14 +154,12 @@ async function getStatus({ idNumber, mobile, pin }) {
  */
 async function getPayDate({ idNumber, mobile, month, year, pin }) {
   try {
-    console.log("Calling Paydate API...", idNumber, mobile, month, year, pin);
 
     const response = await axios.post(
       `${process.env.API_BASE_URL}srdweb/api/whatsapp/paydate`,
       { idNumber, mobile, month, year, pin }
     );
 
-    console.log("Paydate API Response:", response.data);
     return response.data;
 
   } catch (error) {
@@ -163,7 +177,9 @@ module.exports = {
   verifyID,
   verifyMobile,
   sendOtp,
+  sendOtpBefore,
   verifyOtp,
+  verifyOtpBefore,
   getOutcome,
   getStatus,
   getPayDate,

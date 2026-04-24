@@ -26,7 +26,7 @@ module.exports = Object.freeze({
   verifyToken: process.env.VERIFY_TOKEN,
 
   // Server configuration
-  port: process.env.PORT || 8080,
+  port: process.env.PORT || 8482,
   redisHost: process.env.REDIS_HOST || "localhost",
   redisPort: process.env.REDIS_PORT || 6379,
 

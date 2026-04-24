@@ -9,6 +9,8 @@ const { ensureToken } = require("./services/graphServices");
 const app = express();
 app.use(express.json());
 
+app.set('trust proxy', true);
+
 // Health check
 app.get("/", (req, res) => res.send("🚀 SASSA WhatsApp server is running!"));
 
@@ -18,9 +20,9 @@ app.get("/", (req, res) => res.send("🚀 SASSA WhatsApp server is running!"));
 (async () => {
   try {
     const token = await ensureToken();
-    console.log("✅ Access token initialized:", token);
+    // console.log("Access token initialized:", token);
   } catch (err) {
-    console.error("❌ Error initializing token:", err);
+    console.error("Error initializing token:", err);
     process.exit(1); // stop server if token cannot be initialized
   }
 })();
@@ -30,28 +32,62 @@ app.get("/", (req, res) => res.send("🚀 SASSA WhatsApp server is running!"));
 // ----------------------------
 cron.schedule("0 0 * * *", async () => {
   try {
-    console.log("🕛 Running token refresh job...");
+    console.log("Running token refresh job...");
     const token = await ensureToken();
-    console.log("✅ Token refreshed:", token);
+    console.log("Token refreshed:", token);
   } catch (err) {
-    console.error("❌ Token refresh failed:", err);
+    console.error("Token refresh failed:", err);
   }
 });
 
 // ----------------------------
 // Webhook verification
 // ----------------------------
+// app.get("/webhook", (req, res) => {
+//   const mode = req.query["hub.mode"];
+//   const token = req.query["hub.verify_token"];
+//   const challenge = req.query["hub.challenge"];
+
+//   if (mode === "subscribe" && token === process.env.VERIFY_TOKEN) {
+//  const fullUrl = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
+//   console.log("Webhook called at:", fullUrl);
+
+//      console.log("Base URL:", process.env.API_BASE_URL);
+//     console.log("Webhook verified successfully.", req.query);
+//      console.error("Response: ", res);
+//     return res.status(200).type('text/plain').send(challenge);
+//   } else {
+//     console.error("Webhook verification failed. ", req.query);
+//      console.error("Response: ", res);
+//     return res.sendStatus(403);
+//   }
+// });
+
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
 
-  if (mode === "subscribe" && token === process.env.VERIFY_TOKEN) {
-    console.log("✅ Webhook verified");
-    return res.status(200).send(challenge);
+   console.log("Query:", req.query);
+
+  const fullUrl = `${req.protocol}://${req.get("host")}${req.originalUrl}`;
+  console.log("Webhook called at:", fullUrl);
+
+  // Case 1: Health check (no query params)
+  if (!mode) {
+    console.log("Health check hit");
+    return res.status(200).send("Webhook is live");
   }
 
-  res.sendStatus(403);
+  // Case 2: Verification request
+  if (mode === "subscribe" && token === process.env.VERIFY_TOKEN) {
+    console.log("Webhook verified successfully.", req.query);
+    return res.status(200).send(challenge); // <- plain text
+  }
+
+  // Case 3: Invalid token
+  console.error("Webhook verification failed.", req.query);
+  return res.sendStatus(403);
 });
 
 // ----------------------------
@@ -65,7 +101,7 @@ app.post("/webhook", async (req, res) => {
     await handleMessage(message);
     res.sendStatus(200);
   } catch (err) {
-    console.error("❌ Error handling message:", err);
+    console.error("Error handling message:", err);
     res.sendStatus(500);
   }
 });
