@@ -40,35 +40,12 @@ cron.schedule("0 0 * * *", async () => {
   }
 });
 
-// ----------------------------
-// Webhook verification
-// ----------------------------
-// app.get("/webhook", (req, res) => {
-//   const mode = req.query["hub.mode"];
-//   const token = req.query["hub.verify_token"];
-//   const challenge = req.query["hub.challenge"];
-
-//   if (mode === "subscribe" && token === process.env.VERIFY_TOKEN) {
-//  const fullUrl = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
-//   console.log("Webhook called at:", fullUrl);
-
-//      console.log("Base URL:", process.env.API_BASE_URL);
-//     console.log("Webhook verified successfully.", req.query);
-//      console.error("Response: ", res);
-//     return res.status(200).type('text/plain').send(challenge);
-//   } else {
-//     console.error("Webhook verification failed. ", req.query);
-//      console.error("Response: ", res);
-//     return res.sendStatus(403);
-//   }
-// });
-
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
 
-   console.log("Query:", req.query);
+  console.log("Query:", req.query);
 
   const fullUrl = `${req.protocol}://${req.get("host")}${req.originalUrl}`;
   console.log("Webhook called at:", fullUrl);
@@ -93,16 +70,38 @@ app.get("/webhook", (req, res) => {
 // ----------------------------
 // Receive WhatsApp messages
 // ----------------------------
+
 app.post("/webhook", async (req, res) => {
   try {
-    const message = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
-    if (!message) return res.sendStatus(200);
+    const value = req.body.entry?.[0]?.changes?.[0]?.value;
 
-    await handleMessage(message);
-    res.sendStatus(200);
+    if (!value) return res.sendStatus(200);
+
+    // statuses
+    if (value.statuses) {
+      value.statuses.forEach(status => {
+        console.log("Status:", status);
+      });
+    }
+
+    // messages
+    const messages = value.messages;
+
+    if (messages?.length) {
+      for (const msg of messages) {
+        try {
+          await handleMessage(msg);
+          await new Promise(res => setTimeout(res, 200)); // throttle
+        } catch (err) {
+          console.error("Message error:", err);
+        }
+      }
+    }
+
+    return res.status(200).send("EVENT_RECEIVED");
   } catch (err) {
-    console.error("Error handling message:", err);
-    res.sendStatus(500);
+    console.error("Webhook error:", err);
+    return res.status(200).send("EVENT_RECEIVED");
   }
 });
 

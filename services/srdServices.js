@@ -4,7 +4,8 @@ async function verifyID({ idnumber }) {
   try {
     const response = await axios.post(
       `${process.env.API_BASE_URL}srdweb/api/whatsapp/idverify`,
-      { idNumber: idnumber }
+      { idNumber: idnumber },
+      { timeout: 10000 }
     );
 
     return response.data;
@@ -23,7 +24,8 @@ async function verifyMobile({ idNumber, mobile }) {
       {
         idNumber: idNumber,
         mobile: mobile
-      }
+      },
+      { timeout: 10000 }
     );
 
     return response.data;
@@ -44,7 +46,8 @@ async function sendOtp({ idNumber, mobile }) {
   try {
     const response = await axios.post(
       `${process.env.API_BASE_URL}srdweb/api/whatsapp/otp`,
-      { idNumber, mobile }
+      { idNumber, mobile },
+      { timeout: 10000 }
     );
     return response.data;
 
@@ -58,7 +61,8 @@ async function sendOtpBefore({ mobile }) {
   try {
     const response = await axios.post(
       `${process.env.API_BASE_URL}srdweb/api/web/otp`,
-      { mobile }
+      { mobile },
+      { timeout: 10000 }
     );
     //  console.error("Send OTP API Response: ", response);
     return response.data;
@@ -74,7 +78,8 @@ async function verifyOtp({ idNumber, mobile, pin }) {
   try {
     const response = await axios.patch(
       `${process.env.API_BASE_URL}srdweb/api/whatsapp/otp`,
-      { idNumber, mobile, pin }
+      { idNumber, mobile, pin },
+      { timeout: 10000 }
     );
     return response.data;
 
@@ -89,7 +94,8 @@ async function verifyOtpBefore({ mobile, pin }) {
   try {
     const response = await axios.patch(
       `${process.env.API_BASE_URL}srdweb/api/web/otp/max`,
-      { mobile, pin }
+      { mobile, pin },
+      { timeout: 10000 }
     );
     //  console.error("Verify OTP API Response: ", response.data);
     return response.data;
@@ -110,7 +116,8 @@ async function getOutcome({ idNumber, mobile, month, year, pin }) {
         month,
         year,
         pin
-      }
+      },
+      { timeout: 10000 }
     );
 
     return response.data;
@@ -134,7 +141,8 @@ async function getStatus({ idNumber, mobile, pin }) {
 
     const response = await axios.post(
       `${process.env.API_BASE_URL}srdweb/api/whatsapp/status`,
-      { idNumber, mobile, pin }
+      { idNumber, mobile, pin },
+      { timeout: 10000 }
     );
     return response.data;
 
@@ -157,7 +165,8 @@ async function getPayDate({ idNumber, mobile, month, year, pin }) {
 
     const response = await axios.post(
       `${process.env.API_BASE_URL}srdweb/api/whatsapp/paydate`,
-      { idNumber, mobile, month, year, pin }
+      { idNumber, mobile, month, year, pin },
+      { timeout: 10000 }
     );
 
     return response.data;

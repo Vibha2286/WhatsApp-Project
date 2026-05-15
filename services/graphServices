@@ -94,19 +94,20 @@ async function ensureToken(forceRefresh = false) {
     } else {
         process.env.ACCESS_TOKEN = tokenData.access_token;
     }
-
     return process.env.ACCESS_TOKEN;
 }
-/**
- * Send request to WhatsApp API with latest token
- * If token is expired, refresh once and retry
- */
+
+
 async function sendRequest(payload) {
     const url = `https://graph.facebook.com/v24.0/${process.env.PHONE_NUMBER_ID}/messages`;
 
-    try {
-        let token = await ensureToken(false);
+    let attempt = 0;
+    const maxRetries = 3;
 
+    // ✅ Get token ONCE
+    let token = await ensureToken(false);
+
+    while (attempt < maxRetries) {
         try {
             const response = await axios.post(url, payload, {
                 timeout: 60000,
@@ -117,42 +118,49 @@ async function sendRequest(payload) {
             });
 
             return response.data;
+
         } catch (error) {
+            attempt++;
+
             const apiError = error.response?.data?.error;
-            if (apiError?.code === 190) {
-                token = await ensureToken(true);
 
-                const retryResponse = await axios.post(url, payload, {
-                    timeout: 60000,
-                    headers: {
-                        Authorization: `Bearer ${token}`,
-                        "Content-Type": "application/json",
-                    },
-                });
+            console.error(`Attempt ${attempt} failed`);
 
-                return retryResponse.data;
+            //  Retry only for server errors
+            if (
+                attempt < maxRetries &&
+                (error.response?.status >= 500 || apiError?.code === 131000)
+            ) {
+                console.log("Retrying request...");
+                await new Promise(res => setTimeout(res, 1000 * attempt));
+                continue;
             }
 
-            throw error;
+            //  Token expired → refresh ONLY once
+            if (apiError?.code === 190 && attempt < maxRetries) {
+                console.log("Refreshing token...");
+                token = await ensureToken(true); // update token
+                continue;
+            }
+
+            console.error("========== WHATSAPP API ERROR ==========");
+
+            if (error.response) {
+                console.error("Status:", error.response.status);
+                console.error("Data:", JSON.stringify(error.response.data, null, 2));
+            } else {
+                console.error("Error Message:", error.message);
+            }
+
+            console.error("========================================");
+
+            throw new Error(
+                apiError?.message || "WhatsApp message sending failed"
+            );
         }
-    } catch (error) {
-        console.error("========== WHATSAPP API ERROR ==========");
-
-        if (error.response) {
-            console.error("Status:", error.response.status);
-            console.error("Headers:", JSON.stringify(error.response.headers, null, 2));
-            console.error("Data:", JSON.stringify(error.response.data, null, 2));
-        } else {
-            console.error("Error Message:", error.message);
-        }
-
-        console.error("========================================");
-
-        throw new Error(
-            error.response?.data?.error?.message || "WhatsApp message sending failed"
-        );
     }
 }
+
 
 /**
  * Send Text Message

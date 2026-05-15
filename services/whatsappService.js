@@ -44,7 +44,6 @@ async function handleMessage(message) {
 
     if (now - last > SESSION_TIMEOUT) {
         delete sessions[from];
-        await FACEBOOKAPI.sendText(from, CONSTANTS.TIMEOUT_MESSAGE);
         return;
     }
 
@@ -53,7 +52,7 @@ async function handleMessage(message) {
     try {
         switch (session.step) {
             case 1: // Ask for Mobile
-             const inputMobile = getInput(message);
+                const inputMobile = getInput(message);
                 if (inputMobile?.toLowerCase() === "hi") {
                     await startSessionOnHi(from, sessions, Date.now());
                     return;
@@ -637,27 +636,40 @@ module.exports = {
 };
 
 
+const SESSION_TIMEOUT = 20 * 60 * 1000;
+const CLEANUP_INTERVAL = 60 * 1000;
+
 setInterval(async () => {
     const now = Date.now();
+    const expiredUsers = [];
 
-    for (const key of Object.keys(sessions)) {
-        const session = sessions[key];
+    // Step 1: Collect expired sessions
+    for (const [key, session] of Object.entries(sessions)) {
+        if (!session || !session.lastActivity) continue;
 
-        if (session && session.lastActivity) {
-            if (now - session.lastActivity > 20 * 60 * 1000) {
-                console.log(`Cleaning expired session for ${key}`);
-
-                await FACEBOOKAPI.sendText(
-                    key,
-                    CONSTANTS.TIMEOUT_MESSAGE
-                );
-                session.timeoutSent = true;
-
-                delete sessions[key];
-            }
+        if (now - session.lastActivity > SESSION_TIMEOUT) {
+            expiredUsers.push(key);
         }
     }
-}, 1 * 60 * 1000);
+
+    // Step 2: Process them slowly (avoid rate limit)
+    for (const user of expiredUsers) {
+        console.log(`Cleaning expired session for ${user}`);
+
+        try {
+            await FACEBOOKAPI.sendText(user, CONSTANTS.TIMEOUT_MESSAGE);
+
+            // small delay to avoid burst
+            await new Promise(res => setTimeout(res, 400));
+
+        } catch (err) {
+            console.error("Timeout send error:", err.message);
+        }
+
+        delete sessions[user];
+    }
+
+}, CLEANUP_INTERVAL);
 
 function getInput(message) {
     return (
